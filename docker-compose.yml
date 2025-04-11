@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - BOOK_SERVICE_URL=http://book-service:3002
+    depends_on:
+      - auth-service
+      - book-service
+    networks:
+      - microservices-network
+
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - DATABASE_URL=postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
+      - JWT_SECRET=your_jwt_secret_key
+    depends_on:
+      - auth-db
+    networks:
+      - microservices-network
+    command: >
+      sh -c "npx prisma migrate deploy && npm start"
+
+  book-service:
+    build: ./book-service
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - DATABASE_URL=postgresql://postgres:postgres@book-db:5432/book_db?schema=public
+      - AUTH_SERVICE_URL=http://auth-service:3001
+    depends_on:
+      - book-db
+      - auth-service
+    networks:
+      - microservices-network
+    command: >
+      sh -c "npx prisma migrate deploy && npm start"
+
+  auth-db:
+    image: postgres:15-alpine   # or postgres:16-alpine
+    ports:
+      - "5434:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=auth_db
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+    networks:
+      - microservices-network
+
+  book-db:
+    image: postgres:15-alpine   # or postgres:16-alpine
+    ports:
+      - "5433:5432"  # Different host port to avoid conflicts
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=book_db
+    volumes:
+      - book-db-data:/var/lib/postgresql/data
+    networks:
+      - microservices-network
+
+networks:
+  microservices-network:
+    driver: bridge
+
+volumes:
+  auth-db-data:
+  book-db-data:

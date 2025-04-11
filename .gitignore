@@ -1,0 +1,29 @@
+# Node.js
+node_modules/
+
+# Logs
+*.log
+*.log.*
+
+# Shell Scripts
+*.sh
+
+# Prisma
+prisma/migrations/
+prisma/seed.js
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Build and output directories
+build/
+dist/
+tmp/
+out/
