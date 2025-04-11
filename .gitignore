@@ -5,8 +5,7 @@ node_modules/
 *.log
 *.log.*
 
-# Shell Scripts
-*.sh
+
 
 # Prisma
 prisma/migrations/
