@@ -1,0 +1,10 @@
+# Run migrations 
+docker compose run --rm  npx prisma migrate dev --name 
+docker compose run --rm  npx prisma generate
+docker compose run --rm  npx prisma db seed
+docker compose run --rm  npx prisma migrate reset
+docker compose watch
+docker compose down
+docker compose logs -f
+
+

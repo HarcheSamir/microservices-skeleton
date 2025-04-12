@@ -1,3 +1,4 @@
+#for local develpment 
 version: '3.8'
 services:
   auth-db:

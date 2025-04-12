@@ -10,15 +10,24 @@ const app = express();
 // Global Middlewares
 app.use(express.json());
 app.use(cors());
-app.use(morgan('dev'));
+// Only use morgan in development
+if (process.env.NODE_ENV === 'development') {
+    app.use(morgan('dev'));
+}
 
-// Root Route
-app.get('/', (req, res) => {
-  res.json({ message: 'Book Service API' });
+// Health Check Endpoint for Consul
+app.get('/health', (req, res) => {
+    // Add more checks if needed (e.g., DB connection)
+    res.status(200).send('OK');
 });
 
+// // Root Route
+// app.get('/', (req, res) => {
+//     res.json({ message: 'Book Service API' });
+// });
+
 // API Routes
-app.use('/books', bookRoutes);
+app.use('/', bookRoutes);
 
 // Global Error Handler
 app.use(errorHandler);

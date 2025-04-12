@@ -1,55 +1,128 @@
-version: '3.8'
-
 services:
-  api-gateway:
-    build: ./api-gateway
+  consul:
+    image: hashicorp/consul:1.18 # Use a specific, recent version
+    container_name: consul-agent
     ports:
-      - "3000:3000"
-    environment:
-      - PORT=3000
-      - AUTH_SERVICE_URL=http://auth-service:3001
-      - BOOK_SERVICE_URL=http://book-service:3002
-    depends_on:
-      - auth-service
-      - book-service
+      - "8500:8500" # Consul API/UI
+      - "8600:8600/udp" # Consul DNS (optional for this setup)
     networks:
       - microservices-network
+    # Run in development mode (-dev): single node, in-memory, auto-bootstrap
+    command: "agent -dev -client=0.0.0.0 -ui -node=consul-dev-node"
+    healthcheck:
+      test: ["CMD", "consul", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    ports:
+      - "3000:3000"
+    networks:
+      - microservices-network
+    depends_on:
+      consul: # Wait for consul agent
+        condition: service_healthy
+      # Dependencies on actual services are now less critical at compose level
+      # as discovery happens at runtime, but keep for logical ordering
+      auth-service:
+        condition: service_started # Or service_healthy if health check added
+      book-service:
+        condition: service_started # Or service_healthy if health check added
+    environment:
+      # Remove hardcoded URLs
+      - PORT=3000
+      - CONSUL_AGENT_HOST=consul-agent # Service name of the consul container
+      - NODE_ENV=development # Good practice
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./api-gateway/src
+          target: /app/src
+        - action: rebuild
+          path: ./api-gateway/package.json
+        - action: rebuild
+          path: ./api-gateway/package-lock.json
 
   auth-service:
     build: ./auth-service
-    ports:
-      - "3001:3001"
-    environment:
-      - PORT=3001
-      - DATABASE_URL=postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
-      - JWT_SECRET=your_jwt_secret_key
+    # Exposing port externally is optional if only accessed via gateway/consul
+    # ports:
+    #   - "3001:3001"
     depends_on:
-      - auth-db
+      auth-db:
+        condition: service_healthy
+      consul: # Wait for consul agent before registering
+        condition: service_healthy
     networks:
       - microservices-network
-    command: >
-      sh -c "npx prisma migrate deploy && npm start"
+    environment:
+      # Remove hardcoded URLs
+      - PORT=3001
+      - DATABASE_URL=postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
+      - JWT_SECRET=your-secret-key-for-docker-dev
+      - CONSUL_AGENT_HOST=consul-agent
+      - SERVICE_NAME=auth-service # Name to register in Consul
+      # SERVICE_PORT is derived from PORT env var in the code
+      - NODE_ENV=development
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./auth-service/src
+          target: /app/src
+        - action: sync
+          path: ./auth-service/prisma/schema.prisma
+          target: /app/prisma/schema.prisma
+        - action: rebuild
+          path: ./auth-service/package.json
+        - action: rebuild
+          path: ./auth-service/package-lock.json
 
   book-service:
     build: ./book-service
-    ports:
-      - "3002:3002"
-    environment:
-      - PORT=3002
-      - DATABASE_URL=postgresql://postgres:postgres@book-db:5432/book_db?schema=public
-      - AUTH_SERVICE_URL=http://auth-service:3001
+    # Exposing port externally is optional
+    # ports:
+    #   - "3002:3002"
     depends_on:
-      - book-db
-      - auth-service
+      book-db:
+        condition: service_healthy
+      auth-service: # Still useful for logical startup order
+        condition: service_started
+      consul: # Wait for consul agent
+        condition: service_healthy
     networks:
       - microservices-network
-    command: >
-      sh -c "npx prisma migrate deploy && npm start"
+    environment:
+      # Remove hardcoded AUTH_SERVICE_URL
+      - PORT=3002
+      - DATABASE_URL=postgresql://postgres:postgres@book-db:5432/book_db?schema=public
+      - CONSUL_AGENT_HOST=consul-agent
+      - SERVICE_NAME=book-service # Name to register in Consul
+      # SERVICE_PORT is derived from PORT env var in the code
+      - NODE_ENV=development
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./book-service/src
+          target: /app/src
+        - action: sync
+          path: ./book-service/prisma/schema.prisma
+          target: /app/prisma/schema.prisma
+        - action: rebuild
+          path: ./book-service/package.json
+        - action: rebuild
+          path: ./book-service/package-lock.json
 
   auth-db:
-    image: postgres:15-alpine   # or postgres:16-alpine
-    ports:
-      - "5434:5432"
+    image: postgres:15-alpine
+    # No need to expose db ports externally unless debugging directly
+    # ports:
+    #   - "5434:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -58,11 +131,17 @@ services:
       - auth-db-data:/var/lib/postgresql/data
     networks:
       - microservices-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   book-db:
-    image: postgres:15-alpine   # or postgres:16-alpine
-    ports:
-      - "5433:5432"  # Different host port to avoid conflicts
+    image: postgres:15-alpine
+    # No need to expose db ports externally
+    # ports:
+    #   - "5433:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -71,6 +150,11 @@ services:
       - book-db-data:/var/lib/postgresql/data
     networks:
       - microservices-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d book_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   microservices-network:

@@ -2,46 +2,55 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const { createProxyMiddleware } = require('http-proxy-middleware');
-
+const { findService } = require('./consul'); // Import discovery helper
 const errorHandler = require('../middlewares/errorHandler');
-const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL
-const BOOK_SERVICE_URL = process.env.BOOK_SERVICE_URL
-console.log({ AUTH_SERVICE_URL, BOOK_SERVICE_URL })
+
 const app = express();
 
-
+// Global Middlewares
+app.use(cors());
+app.use(morgan('dev'));
 
 // Root Route
 app.get('/', (req, res) => {
   res.json({ message: 'API Gateway' });
 });
 
-// Setup proxies to microservices
-app.use('/api/auth', createProxyMiddleware({
-  target: AUTH_SERVICE_URL, // "http://localhost:3001"
-  pathRewrite: {
-    '^/': '/auth/'
-  },
-  changeOrigin: true
-}));
+// Create proxy configuration dynamically without path rewriting
+const createDynamicProxy = (serviceName) => {
+  return createProxyMiddleware({
+    router: async (req) => {
+      const targetUrl = await findService(serviceName);
+      if (!targetUrl) {
+        throw new Error(`Service '${serviceName}' unavailable.`);
+      }
+      return targetUrl;
+    },
+    // Remove pathRewrite so the incoming path remains unchanged
+    changeOrigin: true,
+    logLevel: process.env.NODE_ENV === 'development' ? 'debug' : 'info',
+    onError: (err, req, res) => {
+      console.error(`Proxy Error for ${serviceName}:`, err.message);
+      if (!res.headersSent) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+      }
+      if (!res.writableEnded) {
+        res.end(JSON.stringify({
+          message: `Service ${serviceName} unavailable or errored.`,
+          error: err.message
+        }));
+      }
+    }
+  });
+};
 
+// Setup dynamic proxies without rewriting paths
+app.use('/api/auth', createDynamicProxy('auth-service'));
+// Remove the separate /api/users mapping because the auth service now handles both `/auth/*` and `/users/*` internally.
+// Adjust the mount points in your auth service if needed.
+app.use('/api/book', createDynamicProxy('book-service'));  // Note: Use `/api/book` per your requirement
 
-app.use('/api/users', createProxyMiddleware({ 
-  target: AUTH_SERVICE_URL,
-  pathRewrite: {'^/': '/users/'},
-  changeOrigin: true
-}));
-
-app.use('/api/books', createProxyMiddleware({ 
-  target: BOOK_SERVICE_URL,
-  pathRewrite: {'^/': '/books/'},
-  changeOrigin: true
-}));
-
-// Global Middlewares
 app.use(express.json());
-app.use(cors());
-app.use(morgan('dev'));
 
 // Global Error Handler
 app.use(errorHandler);

@@ -11,18 +11,26 @@ const app = express();
 // Global Middlewares
 app.use(express.json());
 app.use(cors());
-app.use(morgan('dev'));
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
+
+// Health Check Endpoint for Consul
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
 
 // Root Route
 app.get('/', (req, res) => {
   res.json({ message: 'Auth Service API' });
 });
 
-// API Routes
-app.use('/auth', authRoutes);
+// Now mount the routes directly without a sub-prefix that differs from the gateway path.
+// For example, if the client calls `/api/auth/register`, the authRoutes should respond to `/register`.
+app.use('/', authRoutes);         // This mounts routes defined in auth.routes (e.g., /register, /login, /me, /validate)
+// Mount users routes at '/users' so that `/api/auth/users/:id` will resolve correctly.
 app.use('/users', userRoutes);
 
-// Global Error Handler
 app.use(errorHandler);
 
 module.exports = app;
