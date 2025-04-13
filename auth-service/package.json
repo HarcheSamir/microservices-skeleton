@@ -119,8 +119,8 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "npx prisma migrate reset && node src/index.js",
-    "dev": "echo 'Applying DB schema...' && npx prisma db push && echo 'Starting Service with nodemon...' && nodemon src/index.js",
+    "start": "npx prisma migrate reset --force && node src/index.js",
+    "dev": "echo 'Applying DB schema...' && npx prisma db push --force && echo 'Starting Service with nodemon...' && nodemon src/index.js",
     "prisma:seed": "prisma db seed"
   },
   "prisma": {
