@@ -1,71 +1,47 @@
+// Jenkinsfile (Ultra-Minimal: Build Only using docker-compose.prod.yml)
+// Assumes docker-compose.prod.yml contains necessary config (now with dev secrets)
 
 pipeline {
-    agent any // Run on the main Jenkins node
-
-    environment {
-        JWT_SECRET = "your-dev-secret-from-jenkinsfile"
-    }
+    agent any // Run on Jenkins node with Docker access
 
     options {
         wipeWorkspace()
         timestamps()
         disableConcurrentBuilds()
+        timeout(time: 15, unit: 'MINUTES') // Timeout for build
     }
 
     stages {
         stage('Checkout') {
             steps {
                 cleanWs()
-                checkout scm
+                checkout scm // Get code from Git (configured in Jenkins job)
                 echo "Code checked out."
             }
         }
 
-        stage('Build & Reset') {
-            // WARNING: This stage WIPES databases every time! Only for transient dev/test.
+        stage('Build Production Images') {
             steps {
-                script {
-                    // Use docker compose (v2 syntax)
-                    def composeCmd = "docker compose -f docker-compose.yml" // Note: space, not hyphen
-
-                    try {
-                        echo "Stopping any previous containers..."
-                        sh "${composeCmd} down --remove-orphans || true"
-
-                        echo "Building images..."
-                        // Use buildx which is default in v2, progress plain is good for logs
-                        sh "${composeCmd} build --progress=plain api-gateway auth-service book-service"
-
-                        echo "Starting databases..."
-                        sh "${composeCmd} up -d auth-db book-db"
-
-                        echo "Waiting for databases..."
-                        sleep(20) // Basic wait
-
-                        echo "Resetting Auth Service database..."
-                        // Use 'docker compose run' which is equivalent to v1
-                        sh "${composeCmd} run --rm --entrypoint '' auth-service sh -c 'npx prisma migrate reset --force'"
-
-                        echo "Resetting Book Service database..."
-                        sh "${composeCmd} run --rm --entrypoint '' book-service sh -c 'npx prisma migrate reset --force'"
-
-                        echo "Database resets complete."
-
-                    } catch (e) {
-                        error "Build & Reset stage failed: ${e.getMessage()}"
-                    } finally {
-                        echo "Stopping databases..."
-                        sh "${composeCmd} down --remove-orphans || true"
-                    }
-                }
+                echo "Building production images using docker-compose.prod.yml..."
+                // Use the production compose file ONLY to build
+                // It will use the dev secrets within the file during build if needed
+                sh "docker compose -f docker-compose.prod.yml build --progress=plain"
+                echo "Production images built successfully."
             }
         }
-    }
+    } // End of stages
 
     post {
         always {
-            echo "Pipeline finished. Final cleanup..."
-            sh "docker compose -f docker-compose.yml down --remove-orphans || true"
+            // Minimal cleanup for build process artifacts
+            echo "Pipeline finished. Cleaning up build environment..."
+             sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
+        }
+        success {
+            echo "Production images built successfully."
+        }
+        failure {
+            echo "Pipeline build failed."
         }
     }
 }

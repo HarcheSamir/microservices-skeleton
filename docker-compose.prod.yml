@@ -1,0 +1,127 @@
+# docker-compose.prod.yml (FOR JENKINS/PRODUCTION - USING **DEV** CREDENTIALS - INSECURE!)
+# Defines the entire stack for production/CI, independent of docker-compose.yml.
+
+services:
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: consul-agent-prod
+    ports:
+      - "9500:8500" # Prod Consul UI/API port mapping
+    networks:
+      - microservices-network-prod
+    command: "agent -server -bootstrap-expect=1 -client=0.0.0.0 -ui -node=consul-prod-node"
+    healthcheck:
+       test: ["CMD", "consul", "info"]
+       interval: 10s
+       timeout: 5s
+       retries: 5
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    container_name: api-gateway-prod
+    networks:
+      - microservices-network-prod
+    depends_on:
+      consul:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      book-service:
+        condition: service_started
+    environment:
+      - PORT=3000 # Internal port
+      - CONSUL_AGENT_HOST=consul
+      - NODE_ENV=production
+    command: ["node", "src/index.js"] # Production command
+    ports:
+      - "5000:3000" # Expose gateway externally on host port 5000
+
+  auth-service:
+    build:
+      context: ./auth-service
+    container_name: auth-service-prod
+    networks:
+      - microservices-network-prod
+    depends_on:
+      auth-db-prod:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    environment:
+      - PORT=3001
+      # Using DEV password in connection string
+      - DATABASE_URL=postgresql://postgres:postgres@auth-db-prod:5432/auth_db?schema=public
+      # Using DEV JWT SECRET (match docker-compose.yml's secret)
+      - JWT_SECRET=your-local-dev-secret-key
+      - CONSUL_AGENT_HOST=consul
+      - SERVICE_NAME=auth-service
+      - NODE_ENV=production
+    command: ["node", "src/index.js"] # Production command
+
+  book-service:
+    build:
+      context: ./book-service
+    container_name: book-service-prod
+    networks:
+      - microservices-network-prod
+    depends_on:
+      book-db-prod:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      consul:
+        condition: service_healthy
+    environment:
+      - PORT=3002
+      # Using DEV password in connection string
+      - DATABASE_URL=postgresql://postgres:postgres@book-db-prod:5432/book_db?schema=public
+      - CONSUL_AGENT_HOST=consul
+      - SERVICE_NAME=book-service
+      - NODE_ENV=production
+    command: ["node", "src/index.js"] # Production command
+
+  # --- Production Databases (defined independently) ---
+  auth-db-prod:
+    image: postgres:15-alpine
+    container_name: auth-db-prod
+    environment:
+      - POSTGRES_USER=postgres
+      # Using DEV DATABASE PASSWORD
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=auth_db
+    volumes:
+      - prod-auth-db-data:/var/lib/postgresql/data # Distinct prod volume name
+    networks:
+      - microservices-network-prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  book-db-prod:
+    image: postgres:15-alpine
+    container_name: book-db-prod
+    environment:
+      - POSTGRES_USER=postgres
+      # Using DEV DATABASE PASSWORD
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=book_db
+    volumes:
+      - prod-book-db-data:/var/lib/postgresql/data # Distinct prod volume name
+    networks:
+      - microservices-network-prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d book_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  microservices-network-prod: # Distinct prod network name
+    driver: bridge
+
+volumes:
+  prod-auth-db-data: # Distinct prod volume name
+  prod-book-db-data: # Distinct prod volume name

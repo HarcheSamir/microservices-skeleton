@@ -8,8 +8,6 @@ RUN npm install
 
 COPY . .
 
-COPY .env.docker .env
-
 EXPOSE 3000
 
 CMD ["npm", "start"]

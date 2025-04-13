@@ -1,4 +1,3 @@
-require('dotenv').config();
 const app = require('./config/app');
 const { registerService } = require('./config/consul'); // Import registration function
 
