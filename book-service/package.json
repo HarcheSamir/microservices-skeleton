@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node src/index.js",
+    "start": "npx prisma db push && node src/index.js",
     "dev": "echo 'Applying book DB schema...' && npx prisma db push && echo 'Starting book Service with nodemon...' && nodemon src/index.js",
     "prisma:seed": "prisma db seed"
   },

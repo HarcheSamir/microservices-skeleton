@@ -33,7 +33,7 @@ services:
       - PORT=3000 # Internal port
       - CONSUL_AGENT_HOST=consul
       - NODE_ENV=production
-    command: npm run dev # Production command
+    command: npm run start # Production command
     ports:
       - "5000:3000" # Expose gateway externally on host port 5000
 
@@ -57,7 +57,7 @@ services:
       - CONSUL_AGENT_HOST=consul
       - SERVICE_NAME=auth-service
       - NODE_ENV=production
-    command: npm run dev # Production command
+    command: npm run start # Production command
 
   book-service:
     build:
@@ -79,7 +79,7 @@ services:
       - CONSUL_AGENT_HOST=consul
       - SERVICE_NAME=book-service
       - NODE_ENV=production
-    command: npm run dev # Production command
+    command: npm run start # Production command
 
   # --- Production Databases (defined independently) ---
   auth-db:
