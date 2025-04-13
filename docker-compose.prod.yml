@@ -33,7 +33,7 @@ services:
       - PORT=3000 # Internal port
       - CONSUL_AGENT_HOST=consul
       - NODE_ENV=production
-    command: ["node", "src/index.js"] # Production command
+    command: npm run dev # Production command
     ports:
       - "5000:3000" # Expose gateway externally on host port 5000
 
@@ -44,20 +44,20 @@ services:
     networks:
       - microservices-network-prod
     depends_on:
-      auth-db-prod:
+      auth-db:
         condition: service_healthy
       consul:
         condition: service_healthy
     environment:
       - PORT=3001
       # Using DEV password in connection string
-      - DATABASE_URL=postgresql://postgres:postgres@auth-db-prod:5432/auth_db?schema=public
+      - DATABASE_URL=postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
       # Using DEV JWT SECRET (match docker-compose.yml's secret)
       - JWT_SECRET=your-local-dev-secret-key
       - CONSUL_AGENT_HOST=consul
       - SERVICE_NAME=auth-service
       - NODE_ENV=production
-    command: ["node", "src/index.js"] # Production command
+    command: npm run dev # Production command
 
   book-service:
     build:
@@ -66,7 +66,7 @@ services:
     networks:
       - microservices-network-prod
     depends_on:
-      book-db-prod:
+      book-db:
         condition: service_healthy
       auth-service:
         condition: service_started
@@ -75,14 +75,14 @@ services:
     environment:
       - PORT=3002
       # Using DEV password in connection string
-      - DATABASE_URL=postgresql://postgres:postgres@book-db-prod:5432/book_db?schema=public
+      - DATABASE_URL=postgresql://postgres:postgres@book-db:5432/book_db?schema=public
       - CONSUL_AGENT_HOST=consul
       - SERVICE_NAME=book-service
       - NODE_ENV=production
-    command: ["node", "src/index.js"] # Production command
+    command: npm run dev # Production command
 
   # --- Production Databases (defined independently) ---
-  auth-db-prod:
+  auth-db:
     image: postgres:15-alpine
     container_name: auth-db-prod
     environment:
@@ -100,7 +100,7 @@ services:
       timeout: 5s
       retries: 5
 
-  book-db-prod:
+  book-db:
     image: postgres:15-alpine
     container_name: book-db-prod
     environment:
