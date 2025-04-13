@@ -16,7 +16,7 @@ app.get('/', (req, res) => {
   res.json({ message: 'API Gateway' });
 });
 
-// Create proxy configuration dynamically without path rewriting
+// Create proxy configuration dynamically 
 const createDynamicProxy = (serviceName) => {
   return createProxyMiddleware({
     router: async (req) => {
