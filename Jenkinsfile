@@ -20,7 +20,7 @@ pipeline {
         stage('Build Production Images') {
             steps {
                 echo "Building production images using docker-compose.prod.yml..."
-                sh "docker compose -f docker-compose.prod.yml build --progress=plain"
+                sh "COMPOSE_PROJECT_NAME=prod docker compose -f docker-compose.prod.yml build --progress=plain"
                 echo "Production images built successfully."
             }
         }
@@ -29,8 +29,8 @@ pipeline {
         stage('Deploy/Run Application') {
             steps {
                 echo "Starting application using docker-compose.prod.yml..."
-                sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
-                sh "docker compose -f docker-compose.prod.yml up -d"
+                sh "COMPOSE_PROJECT_NAME=prod docker compose -f docker-compose.prod.yml down --remove-orphans || true"
+                sh "COMPOSE_PROJECT_NAME=prod docker compose -f docker-compose.prod.yml up -d"
                 echo "Application started."
             }
         }
@@ -47,7 +47,7 @@ pipeline {
             // Optional: Still clean up on failure
             script {
                  echo "Attempting cleanup after failure..."
-                 sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
+                 sh "COMPOSE_PROJECT_NAME=prod docker compose -f docker-compose.prod.yml down --remove-orphans || true"
             }
         }
     }
