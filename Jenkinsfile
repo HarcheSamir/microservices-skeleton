@@ -4,7 +4,7 @@ pipeline {
     options {
         timestamps()
         disableConcurrentBuilds()
-        timeout(time: 15, unit: 'MINUTES')
+        timeout(time: 25, unit: 'MINUTES') // Increased timeout maybe needed
     }
 
     stages {
@@ -24,20 +24,31 @@ pipeline {
                 echo "Production images built successfully."
             }
         }
+
+        // *** NEW STAGE TO RUN THE APPLICATION ***
+        stage('Deploy/Run Application') {
+            steps {
+                echo "Starting application using docker-compose.prod.yml..."
+                sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
+                sh "docker compose -f docker-compose.prod.yml up -d"
+                echo "Application started."
+            }
+        }
     }
 
     post {
-        always {
-            script {
-                echo "Pipeline finished. Cleaning up build environment..."
-                sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
-            }
-        }
+    
         success {
-            echo "Production images built successfully."
+            // Changed message to reflect deployment
+            echo "Application built and deployed successfully."
         }
         failure {
-            echo "Pipeline build failed."
+            echo "Pipeline build or deploy failed."
+            // Optional: Still clean up on failure
+            script {
+                 echo "Attempting cleanup after failure..."
+                 sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
+            }
         }
     }
 }
