@@ -20,7 +20,7 @@ pipeline {
         stage('Build Production Images') {
             steps {
                 echo "Building production images using docker-compose.prod.yml..."
-                sh "docker-compose -f docker-compose.prod.yml build --progress=plain"
+                sh "docker compose -f docker-compose.prod.yml build --progress=plain"
                 echo "Production images built successfully."
             }
         }
@@ -30,7 +30,7 @@ pipeline {
         always {
             script {
                 echo "Pipeline finished. Cleaning up build environment..."
-                sh "docker-compose -f docker-compose.prod.yml down --remove-orphans || true"
+                sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
             }
         }
         success {
