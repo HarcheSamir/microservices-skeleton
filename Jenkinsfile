@@ -1,11 +1,11 @@
-// Jenkinsfile (Ultra-Minimal: Build Only using docker-compose.prod.yml)
+// Jenkinsfile (Ultra-Minimal: Build Only - Corrected Workspace Cleanup)
 // Assumes docker-compose.prod.yml contains necessary config (now with dev secrets)
 
 pipeline {
     agent any // Run on Jenkins node with Docker access
 
     options {
-        wipeWorkspace()
+        // --- wipeWorkspace() REMOVED FROM HERE ---
         timestamps()
         disableConcurrentBuilds()
         timeout(time: 15, unit: 'MINUTES') // Timeout for build
@@ -14,7 +14,11 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                // Clean the workspace BEFORE checking out code
                 cleanWs()
+                echo "Workspace cleaned."
+
+                // Now checkout
                 checkout scm // Get code from Git (configured in Jenkins job)
                 echo "Code checked out."
             }
@@ -24,7 +28,6 @@ pipeline {
             steps {
                 echo "Building production images using docker-compose.prod.yml..."
                 // Use the production compose file ONLY to build
-                // It will use the dev secrets within the file during build if needed
                 sh "docker compose -f docker-compose.prod.yml build --progress=plain"
                 echo "Production images built successfully."
             }
@@ -36,6 +39,8 @@ pipeline {
             // Minimal cleanup for build process artifacts
             echo "Pipeline finished. Cleaning up build environment..."
              sh "docker compose -f docker-compose.prod.yml down --remove-orphans || true"
+            // Optional: Clean workspace again after build if desired
+            // cleanWs()
         }
         success {
             echo "Production images built successfully."
