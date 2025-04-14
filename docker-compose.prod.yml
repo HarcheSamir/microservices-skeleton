@@ -1,127 +1,230 @@
-# docker-compose.prod.yml (FOR JENKINS/PRODUCTION - USING **DEV** CREDENTIALS - INSECURE!)
-# Defines the entire stack for production/CI, independent of docker-compose.yml.
+# docker-compose.prod.yml (Based on user's original + Kafka/ES/Search)
+# WARNING: Uses placeholder secrets (postgres:postgres, dev JWT secret). Replace with secure injection for real production.
+# WARNING: Lacks High Availability configurations for Kafka, ZK, ES, Consul.
+
+version: '3.8' # Add version for clarity
 
 services:
-  consul:
-    image: hashicorp/consul:1.18
-    container_name: consul-agent-prod
-    ports:
-      - "9500:8500" # Prod Consul UI/API port mapping
+  # --- Infrastructure Services (Consul was existing, adding ZK, Kafka, ES) ---
+  zookeeper-prod: # NEW Service
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: zookeeper-prod # Distinct prod name
     networks:
-      - microservices-network-prod
-    command: "agent -server -bootstrap-expect=1 -client=0.0.0.0 -ui -node=consul-prod-node"
+      - microservices-network-prod # Use prod network
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
     healthcheck:
-       test: ["CMD", "consul", "info"]
-       interval: 10s
-       timeout: 5s
-       retries: 5
+      test: ["CMD-SHELL", "echo 'ruok' | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  api-gateway:
+  kafka-prod: # NEW Service
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka-prod # Distinct prod name
+    networks:
+      - microservices-network-prod # Use prod network
+    depends_on:
+      zookeeper-prod:
+        condition: service_healthy
+    # No external ports exposed by default in prod
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper-prod:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-prod:9092 # Internal listener ONLY
+      # WARNING: Replication factors below should be >= 3 for HA production
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # Keep enabled for simplicity during CI/test
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/bin/kafka-topics --bootstrap-server kafka-prod:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  elasticsearch-prod: # NEW Service
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    container_name: elasticsearch-prod # Distinct prod name
+    environment:
+      - discovery.type=single-node # WARNING: Use multi-node cluster for HA production
+      - xpack.security.enabled=false # Ignored as requested, but ENABLE security in real production
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m # Tune memory for prod load
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - prod-es-data:/usr/share/elasticsearch/data # Distinct prod volume name
+    networks:
+      - microservices-network-prod # Use prod network
+    # No external ports exposed by default in prod
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --fail http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s || exit 1"] # Yellow okay for single node
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  consul: # Your original Consul definition
+    image: hashicorp/consul:1.18
+    container_name: consul-agent-prod # Your original name
+    ports:
+      - "9500:8500" # Your original port mapping
+    networks:
+      - microservices-network-prod # Use prod network
+    command: "agent -server -bootstrap-expect=1 -client=0.0.0.0 -ui -node=consul-prod-node" # Your original command
+    healthcheck:
+      test: ["CMD", "consul", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Application Services (API Gateway, Auth, Book were existing, adding Search) ---
+  api-gateway: # Your original service name
     build:
       context: ./api-gateway
-    container_name: api-gateway-prod
+    container_name: api-gateway-prod # Your original name
     networks:
-      - microservices-network-prod
+      - microservices-network-prod # Use prod network
     depends_on:
-      consul:
+      consul: # Depends on your consul service name
         condition: service_healthy
-      auth-service:
+      auth-service: # Depends on your auth service name
         condition: service_started
-      book-service:
+      book-service: # Depends on your book service name
+        condition: service_started
+      search-service-prod: # NEW dependency on search service
         condition: service_started
     environment:
-      - PORT=3000 # Internal port
-      - CONSUL_AGENT_HOST=consul
-      - NODE_ENV=production
+      PORT: 3000 # Internal port
+      CONSUL_AGENT_HOST: consul # Your consul service name
+      NODE_ENV: production
     command: npm run start # Production command
     ports:
-      - "5000:3000" # Expose gateway externally on host port 5000
+      - "5000:3000" # Your original port mapping
 
-  auth-service:
+  auth-service: # Your original service name
     build:
       context: ./auth-service
-    container_name: auth-service-prod
+    container_name: auth-service-prod # Your original name
     networks:
-      - microservices-network-prod
+      - microservices-network-prod # Use prod network
     depends_on:
-      auth-db:
+      auth-db: # Depends on your auth-db service name
         condition: service_healthy
-      consul:
+      consul: # Depends on your consul service name
         condition: service_healthy
     environment:
-      - PORT=3001
-      # Using DEV password in connection string
-      - DATABASE_URL=postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
-      # Using DEV JWT SECRET (match docker-compose.yml's secret)
-      - JWT_SECRET=your-local-dev-secret-key
-      - CONSUL_AGENT_HOST=consul
-      - SERVICE_NAME=auth-service
-      - NODE_ENV=production
+      PORT: 3001 # Internal port
+      # Using DEV password as per original file - WARNING: Change in real prod
+      DATABASE_URL: postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
+      # Using DEV JWT SECRET as per original file - WARNING: Change in real prod
+      JWT_SECRET: your-local-dev-secret-key # <-- REPLACE THIS WITH SECURE SECRET
+      CONSUL_AGENT_HOST: consul # Your consul service name
+      SERVICE_NAME: auth-service
+      NODE_ENV: production
     command: npm run start # Production command
 
-  book-service:
+  book-service: # Your original service name
     build:
       context: ./book-service
-    container_name: book-service-prod
+    container_name: book-service-prod # Your original name
     networks:
-      - microservices-network-prod
+      - microservices-network-prod # Use prod network
     depends_on:
-      book-db:
+      book-db: # Depends on your book-db service name
         condition: service_healthy
-      auth-service:
+      auth-service: # Depends on your auth service name
         condition: service_started
-      consul:
+      consul: # Depends on your consul service name
+        condition: service_healthy
+      kafka-prod: # NEW dependency on kafka
         condition: service_healthy
     environment:
-      - PORT=3002
-      # Using DEV password in connection string
-      - DATABASE_URL=postgresql://postgres:postgres@book-db:5432/book_db?schema=public
-      - CONSUL_AGENT_HOST=consul
-      - SERVICE_NAME=book-service
-      - NODE_ENV=production
+      PORT: 3002 # Internal port
+      # Using DEV password as per original file - WARNING: Change in real prod
+      DATABASE_URL: postgresql://postgres:postgres@book-db:5432/book_db?schema=public
+      CONSUL_AGENT_HOST: consul # Your consul service name
+      SERVICE_NAME: book-service
+      KAFKA_BROKERS: kafka-prod:9092 # NEW env var: points to prod kafka service
+      NODE_ENV: production
     command: npm run start # Production command
 
-  # --- Production Databases (defined independently) ---
-  auth-db:
-    image: postgres:15-alpine
-    container_name: auth-db-prod
-    environment:
-      - POSTGRES_USER=postgres
-      # Using DEV DATABASE PASSWORD
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=auth_db
-    volumes:
-      - prod-auth-db-data:/var/lib/postgresql/data # Distinct prod volume name
+  search-service-prod: # NEW Service
+    build:
+      context: ./search-service
+    container_name: search-service-prod # Distinct prod name
     networks:
-      - microservices-network-prod
+      - microservices-network-prod # Use prod network
+    depends_on:
+      consul: # Depends on your consul service name
+        condition: service_healthy
+      kafka-prod: # Depends on prod kafka
+        condition: service_healthy
+      elasticsearch-prod: # Depends on prod elasticsearch
+        condition: service_healthy
+    environment:
+      PORT: 3003 # Internal port
+      CONSUL_AGENT_HOST: consul # Your consul service name
+      SERVICE_NAME: search-service
+      KAFKA_BROKERS: kafka-prod:9092 # Points to prod kafka service
+      ELASTICSEARCH_NODE: http://elasticsearch-prod:9200 # Points to prod ES service
+      NODE_ENV: production
+    command: npm run start # Production command
+
+  # --- Production Databases (using your original names) ---
+  auth-db: # Your original service name
+    image: postgres:15-alpine
+    container_name: auth-db-prod # Your original name
+    environment:
+      POSTGRES_USER: postgres
+      # Using DEV DATABASE PASSWORD as per original file - WARNING: Change in real prod
+      POSTGRES_PASSWORD: postgres # <-- REPLACE THIS WITH SECURE SECRET
+      POSTGRES_DB: auth_db
+    volumes:
+      - prod-auth-db-data:/var/lib/postgresql/data # Your original volume name
+    networks:
+      - microservices-network-prod # Use prod network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d auth_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  book-db:
+  book-db: # Your original service name
     image: postgres:15-alpine
-    container_name: book-db-prod
+    container_name: book-db-prod # Your original name
     environment:
-      - POSTGRES_USER=postgres
-      # Using DEV DATABASE PASSWORD
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=book_db
+      POSTGRES_USER: postgres
+      # Using DEV DATABASE PASSWORD as per original file - WARNING: Change in real prod
+      POSTGRES_PASSWORD: postgres # <-- REPLACE THIS WITH SECURE SECRET
+      POSTGRES_DB: book_db
     volumes:
-      - prod-book-db-data:/var/lib/postgresql/data # Distinct prod volume name
+      - prod-book-db-data:/var/lib/postgresql/data # Your original volume name
     networks:
-      - microservices-network-prod
+      - microservices-network-prod # Use prod network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d book_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+# --- Production Network (using original name) ---
 networks:
-  microservices-network-prod: # Distinct prod network name
+  microservices-network-prod: # Your original network name
     driver: bridge
+    name: microservices-network-prod # Explicitly name network (good practice)
 
+# --- Production Volumes 
 volumes:
-  prod-auth-db-data: # Distinct prod volume name
-  prod-book-db-data: # Distinct prod volume name
+  prod-auth-db-data: # Your original volume name
+    name: prod-auth-db-data # Explicitly name volume
+  prod-book-db-data: # Your original volume name
+    name: prod-book-db-data # Explicitly name volume
+  prod-es-data:      # NEW volume for Elasticsearch data
+    name: prod-es-data # Explicitly name volume
