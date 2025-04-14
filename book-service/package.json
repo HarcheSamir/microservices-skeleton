@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "npx prisma migrate reset --force && node src/index.js",
-    "dev": "echo 'Applying DB schema...' && npx prisma db push  && echo 'Starting Service with nodemon...' && nodemon src/index.js",
+    "dev": "echo 'Applying DB schema...' && npx prisma migrate reset --force  && echo 'Starting Service with nodemon...' && nodemon src/index.js",
     "prisma:seed": "prisma db seed"
   },
   "prisma": {
@@ -24,7 +24,8 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "morgan": "^1.10.0",
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.9",
+    "kafkajs": "^2.2.4"
 
   },
   "devDependencies": {

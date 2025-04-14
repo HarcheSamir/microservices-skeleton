@@ -1,13 +1,83 @@
+# docker-compose.yml (Development)
 services:
-  consul:
-    image: hashicorp/consul:1.18 # Use a specific, recent version
-    container_name: consul-agent
-    ports:
-      - "8500:8500" # Consul API/UI
-      - "8600:8600/udp" # Consul DNS (optional for this setup)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2 # Use a stable version
+    container_name: zookeeper-dev
     networks:
       - microservices-network
-    # Run in development mode (-dev): single node, in-memory, auto-bootstrap
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'ruok' | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.2 # Match Zookeeper version branch
+    container_name: kafka-dev
+    networks:
+      - microservices-network
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      # Optional: Expose for external tools if needed, but not required for inter-service comms
+      # "9092:9092"
+      - "29092:29092" # Exposed for host access if absolutely needed (e.g., local dev tool)
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper-dev:2181'
+      # Listeners: PLAINTEXT for internal Docker network, EXTERNAL for potential host access
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-dev:9092,EXTERNAL://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # Dev setting
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0 # Dev setting
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1 # Dev setting
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1 # Dev setting
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1 # Dev setting
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1 # Dev setting
+      KAFKA_JMX_PORT: 9999 # Optional JMX
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # Allow automatic topic creation for simplicity
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/bin/kafka-topics --bootstrap-server kafka-dev:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1 # Use a specific recent version
+    container_name: elasticsearch-dev
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false # Disable security for simplicity (as requested)
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m # Adjust memory as needed
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es-data-dev:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200" # Expose ES API
+      # - "9300:9300" # Transport - usually not needed externally
+    networks:
+      - microservices-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --fail http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: consul-agent # Renamed for clarity vs prod
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    networks:
+      - microservices-network
     command: "agent -dev -client=0.0.0.0 -ui -node=consul-dev-node"
     healthcheck:
       test: ["CMD", "consul", "info"]
@@ -18,24 +88,26 @@ services:
   api-gateway:
     build:
       context: ./api-gateway
+    container_name: api-gateway-dev
     ports:
       - "3000:3000"
     networks:
       - microservices-network
     depends_on:
-      consul: # Wait for consul agent
+      consul:
         condition: service_healthy
-      # Dependencies on actual services are now less critical at compose level
-      # as discovery happens at runtime, but keep for logical ordering
+      # Dependencies on services are less critical now due to discovery
+      # but good for startup order logic
       auth-service:
-        condition: service_started # Or service_healthy if health check added
+        condition: service_started
       book-service:
-        condition: service_started # Or service_healthy if health check added
+        condition: service_started
+      search-service: # Add dependency on the new service
+        condition: service_started
     environment:
-      # Remove hardcoded URLs
-      - PORT=3000
-      - CONSUL_AGENT_HOST=consul-agent # Service name of the consul container
-      - NODE_ENV=development # Good practice
+      PORT: 3000
+      CONSUL_AGENT_HOST: consul-agent
+      NODE_ENV: development
     command: npm run dev
     develop:
       watch:
@@ -49,25 +121,23 @@ services:
 
   auth-service:
     build: ./auth-service
-    # Exposing port externally is optional if only accessed via gateway/consul
-    # ports:
-    #   - "3001:3001"
+    container_name: auth-service-dev
+    ports: # Optional external exposure
+       - "3001:3001"
     depends_on:
       auth-db:
         condition: service_healthy
-      consul: # Wait for consul agent before registering
+      consul:
         condition: service_healthy
     networks:
       - microservices-network
     environment:
-      # Remove hardcoded URLs
-      - PORT=3001
-      - DATABASE_URL=postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
-      - JWT_SECRET=your-secret-key-for-docker-dev
-      - CONSUL_AGENT_HOST=consul-agent
-      - SERVICE_NAME=auth-service # Name to register in Consul
-      # SERVICE_PORT is derived from PORT env var in the code
-      - NODE_ENV=development
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:postgres@auth-db:5432/auth_db?schema=public
+      JWT_SECRET: your-secret-key-for-docker-dev # USE ENV VARS IN REAL PROD
+      CONSUL_AGENT_HOST: consul-agent
+      SERVICE_NAME: auth-service
+      NODE_ENV: development
     command: npm run dev
     develop:
       watch:
@@ -84,26 +154,27 @@ services:
 
   book-service:
     build: ./book-service
-    # Exposing port externally is optional
-    # ports:
-    #   - "3002:3002"
+    container_name: book-service-dev
+    ports: # Optional external exposure
+      - "3002:3002"
     depends_on:
       book-db:
         condition: service_healthy
-      auth-service: # Still useful for logical startup order
+      auth-service:
         condition: service_started
-      consul: # Wait for consul agent
+      consul:
+        condition: service_healthy
+      kafka: # Depends on Kafka
         condition: service_healthy
     networks:
       - microservices-network
     environment:
-      # Remove hardcoded AUTH_SERVICE_URL
-      - PORT=3002
-      - DATABASE_URL=postgresql://postgres:postgres@book-db:5432/book_db?schema=public
-      - CONSUL_AGENT_HOST=consul-agent
-      - SERVICE_NAME=book-service # Name to register in Consul
-      # SERVICE_PORT is derived from PORT env var in the code
-      - NODE_ENV=development
+      PORT: 3002
+      DATABASE_URL: postgresql://postgres:postgres@book-db:5432/book_db?schema=public
+      CONSUL_AGENT_HOST: consul-agent
+      SERVICE_NAME: book-service
+      KAFKA_BROKERS: kafka-dev:9092 # Internal Kafka address
+      NODE_ENV: development
     command: npm run dev
     develop:
       watch:
@@ -118,15 +189,47 @@ services:
         - action: rebuild
           path: ./book-service/package-lock.json
 
+  search-service: # NEW Service Definition
+    build: ./search-service
+    container_name: search-service-dev
+    ports: # Optional external exposure
+      - "3003:3003"
+    depends_on:
+      consul:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - microservices-network
+    environment:
+      PORT: 3003
+      CONSUL_AGENT_HOST: consul-agent
+      SERVICE_NAME: search-service
+      KAFKA_BROKERS: kafka-dev:9092
+      ELASTICSEARCH_NODE: http://elasticsearch-dev:9200 # ES address within Docker
+      NODE_ENV: development
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./search-service/src
+          target: /app/src
+        - action: rebuild
+          path: ./search-service/package.json
+        - action: rebuild
+          path: ./search-service/package-lock.json
+
   auth-db:
     image: postgres:15-alpine
-    # No need to expose db ports externally unless debugging directly
-    # ports:
-    #   - "5434:5432"
+    container_name: auth-db-dev
+    ports:
+      - "5434:5432" # For external debugging access
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=auth_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres # DEV ONLY
+      POSTGRES_DB: auth_db
     volumes:
       - auth-db-data:/var/lib/postgresql/data
     networks:
@@ -139,13 +242,13 @@ services:
 
   book-db:
     image: postgres:15-alpine
-    # No need to expose db ports externally
-    # ports:
-    #   - "5433:5432"
+    container_name: book-db-dev
+    ports:
+      - "5433:5432" # For external debugging access
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=book_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres # DEV ONLY
+      POSTGRES_DB: book_db
     volumes:
       - book-db-data:/var/lib/postgresql/data
     networks:
@@ -163,4 +266,4 @@ networks:
 volumes:
   auth-db-data:
   book-db-data:
-  
+  es-data-dev: # Persistent volume for ES data
